@@ -57,6 +57,7 @@ async def transcribe_audio(audio_path: str) -> list[dict]:
         diarize=True,
         punctuate=True,
         utterances=True,
+        filler_words=True,
         request_options=RequestOptions(timeout_in_seconds=300),
     )
 

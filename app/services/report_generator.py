@@ -33,6 +33,7 @@ async def _get_recommendations(analysis: dict, rubric: dict) -> list[str]:
     system_prompt = (
         "You are an expert call center coach. "
         "Based on the analysis results, generate 3-5 specific, actionable coaching recommendations. "
+        "Detect the language of the rubric criteria and write ALL recommendations in that SAME language. "
         "Return JSON only."
     )
     user_prompt = f"""
@@ -42,7 +43,7 @@ Analysis:
 Rubric criteria:
 {json.dumps(rubric.get("criteria", []), indent=2)}
 
-Return a JSON object:
+Return a JSON object with recommendations written in the same language as the rubric criteria:
 {{
   "recommendations": [
     "Actionable recommendation 1",

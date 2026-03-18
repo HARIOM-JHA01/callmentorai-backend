@@ -55,10 +55,25 @@ async def analyze_call(transcript: list[dict], rubric: dict) -> dict:
     transcript_text = _format_transcript(transcript)
     rubric_text = _format_rubric(rubric)
 
+    # Detect the language of the rubric so the analysis is returned in the same language.
+    # We sample the first criterion name + description to infer language.
+    sample_text = " ".join(
+        f"{c.get('name', '')} {c.get('description', '')}"
+        for c in rubric.get("criteria", [])[:3]
+    ).strip()
+
+    language_instruction = (
+        "IMPORTANT: Detect the language of the rubric criteria provided below and write ALL "
+        "text fields in your JSON response (reason, strengths, improvements, key_moment descriptions) "
+        "in that SAME language. If the rubric is in Spanish, respond in Spanish. "
+        "If it is in English, respond in English. Match the language exactly."
+    )
+
     system_prompt = (
         "You are an expert call center quality assurance analyst and coach. "
         "Analyze the provided call transcript against the given evaluation rubric. "
         "Be objective, specific, and cite exact moments from the transcript where relevant. "
+        f"{language_instruction} "
         "Always return valid JSON only — no markdown, no extra commentary."
     )
 
@@ -77,19 +92,19 @@ Return ONLY a JSON object in this exact format:
       "category": "Category Name",
       "score": 8,
       "max_score": 10,
-      "reason": "Specific reason based on the transcript"
+      "reason": "Specific reason based on the transcript (in the same language as the rubric)"
     }}
   ],
   "strengths": [
-    "Specific strength observed in the call"
+    "Specific strength observed in the call (in the same language as the rubric)"
   ],
   "improvements": [
-    "Specific area for improvement with actionable advice"
+    "Specific area for improvement with actionable advice (in the same language as the rubric)"
   ],
   "key_moments": [
     {{
       "timestamp": "MM:SS",
-      "description": "Description of the key moment"
+      "description": "Description of the key moment (in the same language as the rubric)"
     }}
   ]
 }}
@@ -99,6 +114,7 @@ Ensure:
 - Scores are integers within [0, max_score]
 - Strengths and improvements are specific to this call
 - Key moments cite the most important 3-5 moments from the transcript
+- ALL descriptive text must be in the same language as the rubric criteria
 """
 
     client = _get_openai()
