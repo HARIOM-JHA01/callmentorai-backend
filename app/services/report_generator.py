@@ -161,102 +161,202 @@ def generate_pdf_bytes(report_data: dict) -> bytes:
         Table,
         TableStyle,
         HRFlowable,
+        KeepTogether,
     )
 
+    PAGE_W, PAGE_H = A4
+    LEFT_MARGIN = 2 * cm
+    RIGHT_MARGIN = 2 * cm
+    TOP_MARGIN = 2 * cm
+    BOTTOM_MARGIN = 2 * cm
+    USABLE_WIDTH = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN  # ~17 cm
+
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=LEFT_MARGIN,
+        rightMargin=RIGHT_MARGIN,
+        topMargin=TOP_MARGIN,
+        bottomMargin=BOTTOM_MARGIN,
+    )
     styles = getSampleStyleSheet()
 
-    heading1 = ParagraphStyle("Heading1Custom", parent=styles["Heading1"], fontSize=18, spaceAfter=6)
-    heading2 = ParagraphStyle("Heading2Custom", parent=styles["Heading2"], fontSize=14, spaceAfter=4)
-    normal = styles["Normal"]
+    heading1 = ParagraphStyle(
+        "Heading1Custom",
+        parent=styles["Heading1"],
+        fontSize=18,
+        spaceAfter=6,
+        spaceBefore=0,
+        leading=22,
+        wordWrap="CJK",
+    )
+    heading2 = ParagraphStyle(
+        "Heading2Custom",
+        parent=styles["Heading2"],
+        fontSize=13,
+        spaceAfter=4,
+        spaceBefore=10,
+        leading=18,
+        textColor=colors.HexColor("#C0392B"),
+        wordWrap="CJK",
+    )
+    normal = ParagraphStyle(
+        "NormalCustom",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=14,
+        spaceAfter=3,
+        wordWrap="CJK",
+    )
+    bullet = ParagraphStyle(
+        "BulletCustom",
+        parent=normal,
+        leftIndent=14,
+        firstLineIndent=0,
+        spaceAfter=4,
+    )
+    label_style = ParagraphStyle(
+        "LabelStyle",
+        parent=normal,
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=14,
+    )
 
     story = []
 
-    # Title
+    # ── Title ──────────────────────────────────────────────────────────────────
     story.append(Paragraph("CallMentor AI — Coaching Report", heading1))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#C0392B")))
     story.append(Spacer(1, 0.4 * cm))
 
-    # Summary
+    # ── Call Summary ───────────────────────────────────────────────────────────
     summary = report_data.get("summary", {})
     story.append(Paragraph("Call Summary", heading2))
+
+    # Use Paragraph cells so long values wrap instead of overflowing
+    label_w = 3.8 * cm
+    value_w = USABLE_WIDTH - label_w
+
+    def _label(text: str) -> Paragraph:
+        return Paragraph(text, label_style)
+
+    def _value(text: str) -> Paragraph:
+        return Paragraph(str(text), normal)
+
     summary_rows = [
-        ["Agent", summary.get("agent_name", "")],
-        ["Client", summary.get("client_name", "")],
-        ["Call Title", summary.get("call_title", "")],
-        ["Call Date", summary.get("call_date", "")],
-        ["Overall Score", f"{summary.get('overall_score', 0)} / {summary.get('max_score', 0)} "
-                          f"({summary.get('percentage', 0)}%)"],
+        [_label("Agent"),         _value(summary.get("agent_name", "—"))],
+        [_label("Client"),        _value(summary.get("client_name", "—"))],
+        [_label("Call Title"),    _value(summary.get("call_title", "—"))],
+        [_label("Call Date"),     _value(summary.get("call_date", "—"))],
+        [_label("Overall Score"), _value(
+            f"{summary.get('overall_score', 0)} / {summary.get('max_score', 0)} "
+            f"({summary.get('percentage', 0)}%)"
+        )],
     ]
-    tbl = Table(summary_rows, colWidths=[4 * cm, 12 * cm])
+    tbl = Table(summary_rows, colWidths=[label_w, value_w], repeatRows=0)
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F2F2F2")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCCCCC")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("PADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
     ]))
     story.append(tbl)
     story.append(Spacer(1, 0.6 * cm))
 
-    # Rubric Scores
+    # ── Rubric / Evaluation Scores ─────────────────────────────────────────────
     scores = report_data.get("rubric_scores", [])
     if scores:
         story.append(Paragraph("Evaluation Scores", heading2))
-        score_rows = [["Category", "Score", "Max", "Reason"]]
+
+        cat_w   = 4.0 * cm
+        score_w = 1.6 * cm
+        max_w   = 1.6 * cm
+        reason_w = USABLE_WIDTH - cat_w - score_w - max_w
+
+        header_style = ParagraphStyle(
+            "HeaderStyle", parent=normal,
+            fontName="Helvetica-Bold", textColor=colors.white, fontSize=9,
+        )
+        score_rows = [[
+            Paragraph("Category", header_style),
+            Paragraph("Score", header_style),
+            Paragraph("Max", header_style),
+            Paragraph("Reason", header_style),
+        ]]
         for s in scores:
             score_rows.append([
-                s.get("category", ""),
-                str(s.get("score", 0)),
-                str(s.get("max_score", 0)),
+                Paragraph(s.get("category", ""), normal),
+                Paragraph(str(s.get("score", 0)), normal),
+                Paragraph(str(s.get("max_score", 0)), normal),
                 Paragraph(s.get("reason", ""), normal),
             ])
-        score_tbl = Table(score_rows, colWidths=[4 * cm, 1.5 * cm, 1.5 * cm, 10 * cm])
+
+        score_tbl = Table(
+            score_rows,
+            colWidths=[cat_w, score_w, max_w, reason_w],
+            repeatRows=1,
+        )
         score_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#C0392B")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCCCCC")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("PADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FFF5F5")]),
         ]))
         story.append(score_tbl)
         story.append(Spacer(1, 0.6 * cm))
 
-    # Strengths
+    # ── Strengths ──────────────────────────────────────────────────────────────
     strengths = report_data.get("strengths", [])
     if strengths:
-        story.append(Paragraph("Strengths", heading2))
+        items = [Paragraph("Strengths", heading2)]
         for item in strengths:
-            story.append(Paragraph(f"• {item}", normal))
-        story.append(Spacer(1, 0.4 * cm))
+            items.append(Paragraph(f"• {item}", bullet))
+        items.append(Spacer(1, 0.3 * cm))
+        story.append(KeepTogether(items))
 
-    # Areas for Improvement
+    # ── Areas for Improvement ──────────────────────────────────────────────────
     improvements = report_data.get("areas_for_improvement", [])
     if improvements:
-        story.append(Paragraph("Areas for Improvement", heading2))
+        items = [Paragraph("Areas for Improvement", heading2)]
         for item in improvements:
-            story.append(Paragraph(f"• {item}", normal))
-        story.append(Spacer(1, 0.4 * cm))
+            items.append(Paragraph(f"• {item}", bullet))
+        items.append(Spacer(1, 0.3 * cm))
+        story.append(KeepTogether(items))
 
-    # Key Moments
+    # ── Key Moments ────────────────────────────────────────────────────────────
     key_moments = report_data.get("key_moments", [])
     if key_moments:
         story.append(Paragraph("Key Moments", heading2))
         for km in key_moments:
-            story.append(Paragraph(f"<b>[{km.get('timestamp', '')}]</b> {km.get('description', '')}", normal))
+            ts = km.get("timestamp", "")
+            desc = km.get("description", "")
+            text = f"<b>[{ts}]</b> {desc}" if ts else desc
+            story.append(Paragraph(text, bullet))
         story.append(Spacer(1, 0.4 * cm))
 
-    # Recommendations
+    # ── Coaching Recommendations ───────────────────────────────────────────────
     recommendations = report_data.get("recommendations", [])
     if recommendations:
-        story.append(Paragraph("Coaching Recommendations", heading2))
+        items = [Paragraph("Coaching Recommendations", heading2)]
         for i, rec in enumerate(recommendations, 1):
-            story.append(Paragraph(f"{i}. {rec}", normal))
-        story.append(Spacer(1, 0.4 * cm))
+            items.append(Paragraph(f"{i}. {rec}", bullet))
+        items.append(Spacer(1, 0.3 * cm))
+        story.append(KeepTogether(items))
 
     doc.build(story)
     buffer.seek(0)
