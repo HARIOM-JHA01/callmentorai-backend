@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.database.connection import get_db
 from app.models.session import Session, Transcript, Analysis
 from app.pipelines.analysis_pipeline import run_analysis_pipeline
+from app.services.progress import get_progress
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -102,6 +103,8 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
+    progress = get_progress(session.id) if session.status == "processing" else None
+
     return {
         "session_id": session.id,
         "call_title": session.call_title,
@@ -112,6 +115,8 @@ async def get_session(
         "error_message": session.error_message,
         "created_at": session.created_at.isoformat() if session.created_at else None,
         "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        "progress_pct": progress["pct"] if progress else None,
+        "progress_stage": progress["stage"] if progress else None,
     }
 
 
