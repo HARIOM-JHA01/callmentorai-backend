@@ -9,8 +9,6 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-SPEAKER_MAP = {0: "Speaker 1", 1: "Speaker 2"}
-
 _MAX_RETRIES = 3
 _RETRY_DELAY = 5  # seconds between retries
 
@@ -72,35 +70,33 @@ async def transcribe_audio(audio_path: str) -> list[dict]:
     return result
 
 
-def _speaker_label(speaker_id: str | None, index: int) -> str:
-    """Map ElevenLabs speaker_id strings (e.g. 'speaker_0') to display labels."""
-    if speaker_id is None:
-        return SPEAKER_MAP.get(0, "Speaker 1")
-    # speaker_id is like "speaker_0", "speaker_1", …
-    try:
-        idx = int(speaker_id.split("_")[-1])
-    except (ValueError, IndexError):
-        idx = index
-    return SPEAKER_MAP.get(idx, f"Speaker {idx + 1}")
-
-
 def _build_utterances(response) -> list[dict]:
     """
     Group ElevenLabs word-level results by consecutive speaker into utterances.
+    Dynamically remaps whatever speaker IDs ElevenLabs returns (which may be
+    non-consecutive, e.g. speaker_0, speaker_2, speaker_4) to sequential labels
+    (Speaker 1, Speaker 2, …) in order of first appearance.
     """
     words = getattr(response, "words", None) or []
     if not words:
         return []
+
+    # Dynamic remap: first seen speaker_id → "Speaker 1", second → "Speaker 2", …
+    speaker_remap: dict[str, str] = {}
+
+    def get_label(sp: str | None) -> str:
+        key = sp or "unknown"
+        if key not in speaker_remap:
+            speaker_remap[key] = f"Speaker {len(speaker_remap) + 1}"
+        return speaker_remap[key]
 
     utterances: list[dict] = []
     current_speaker: str | None = None
     current_words: list[str] = []
     current_start = 0.0
     current_end = 0.0
-    speaker_index = 0
 
     for w in words:
-        # word type may be "word" or "spacing" — skip non-word tokens
         word_type = getattr(w, "type", "word")
         if word_type != "word":
             continue
@@ -117,13 +113,12 @@ def _build_utterances(response) -> list[dict]:
             if current_words and current_speaker is not None:
                 utterances.append(
                     {
-                        "speaker": _speaker_label(current_speaker, speaker_index),
+                        "speaker": get_label(current_speaker),
                         "text": " ".join(current_words),
                         "start": round(current_start, 3),
                         "end": round(current_end, 3),
                     }
                 )
-                speaker_index += 1
             current_speaker = sp
             current_words = [text]
             current_start = start
@@ -135,7 +130,7 @@ def _build_utterances(response) -> list[dict]:
     if current_words and current_speaker is not None:
         utterances.append(
             {
-                "speaker": _speaker_label(current_speaker, speaker_index),
+                "speaker": get_label(current_speaker),
                 "text": " ".join(current_words),
                 "start": round(current_start, 3),
                 "end": round(current_end, 3),
