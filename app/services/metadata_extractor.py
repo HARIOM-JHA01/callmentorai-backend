@@ -25,29 +25,23 @@ async def extract_call_metadata(
     existing_date: str | None,
 ) -> dict:
     """
-    Use an LLM to infer call title, speaker identities, and date from the transcript
-    when any of those fields are missing. Fields already provided by the user are
-    returned unchanged.
+    Use an LLM to infer call title, speaker identities, and date from the transcript.
+    Always returns both English and Spanish versions of text fields.
 
     Returns:
         {
-            "call_title": str,
-            "speaker1_name": str | None,   # real name/role of Speaker 1
-            "speaker2_name": str | None,   # real name/role of Speaker 2
-            "call_date": str,              # YYYY-MM-DD, defaults to today
+            "call_title": str,          # English
+            "call_title_es": str,       # Spanish
+            "speaker1_name": str | None,
+            "speaker1_name_es": str | None,
+            "speaker2_name": str | None,
+            "speaker2_name_es": str | None,
+            "call_date": str,           # YYYY-MM-DD
         }
     """
-    # If everything is already provided, nothing to do
     today = date.today().isoformat()
-    if existing_title and existing_speaker1_name and existing_speaker2_name and existing_date:
-        return {
-            "call_title": existing_title,
-            "speaker1_name": existing_speaker1_name,
-            "speaker2_name": existing_speaker2_name,
-            "call_date": existing_date,
-        }
 
-    # Build the full transcript
+    # Build the full transcript snippet
     snippet_lines = []
     for utt in utterances:
         speaker = utt.get("speaker", "?")
@@ -55,14 +49,17 @@ async def extract_call_metadata(
         snippet_lines.append(f"{speaker}: {text}")
     transcript_snippet = "\n".join(snippet_lines)
 
-    prompt = f"""You are analysing a phone/video call transcript. Based on the dialogue below,
-extract the following metadata. Respond ONLY with a valid JSON object and nothing else.
+    prompt = f"""You are analysing a phone/video call transcript. Extract the following metadata
+and return it in BOTH English and Spanish. Respond ONLY with a valid JSON object and nothing else.
 
 Fields to extract:
-- "call_title": A short, descriptive title for this call (e.g. "Sales Discovery Call with Acme Corp", "Support Call – Billing Issue"). Max 80 chars.
-- "speaker1_name": The real name or role of the person labelled "Speaker 1" if it can be inferred (e.g. "John (Sales Rep)", "Customer Support Agent"). Null if not determinable.
-- "speaker2_name": The real name or role of the person labelled "Speaker 2" if it can be inferred. Null if not determinable.
-- "call_date": The date of the call in YYYY-MM-DD format if mentioned in the transcript, otherwise null.
+- "call_title": Short descriptive title in English (e.g. "Sales Discovery Call with Acme Corp"). Max 80 chars.
+- "call_title_es": Same title translated to Spanish (e.g. "Llamada de Descubrimiento de Ventas con Acme Corp"). Max 80 chars.
+- "speaker1_name": Real name or role of Speaker 1 in English (e.g. "John (Sales Rep)"). Null if not determinable.
+- "speaker1_name_es": Same in Spanish (e.g. "Juan (Representante de Ventas)"). Null if not determinable.
+- "speaker2_name": Real name or role of Speaker 2 in English. Null if not determinable.
+- "speaker2_name_es": Same in Spanish. Null if not determinable.
+- "call_date": Date of the call in YYYY-MM-DD format if mentioned, otherwise null.
 
 Already known (do NOT override with null):
 - call_title: {json.dumps(existing_title)}
@@ -81,10 +78,9 @@ JSON response:"""
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=200,
+            max_tokens=400,
         )
         raw = response.choices[0].message.content.strip()
-        # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -94,9 +90,13 @@ JSON response:"""
         logger.warning(f"[MetadataExtractor] LLM extraction failed: {exc}. Using defaults.")
         data = {}
 
+    en_title = existing_title or data.get("call_title") or "Untitled Call"
     return {
-        "call_title": existing_title or data.get("call_title") or "Untitled Call",
+        "call_title": en_title,
+        "call_title_es": data.get("call_title_es") or en_title,
         "speaker1_name": existing_speaker1_name or data.get("speaker1_name"),
+        "speaker1_name_es": data.get("speaker1_name_es") or existing_speaker1_name,
         "speaker2_name": existing_speaker2_name or data.get("speaker2_name"),
+        "speaker2_name_es": data.get("speaker2_name_es") or existing_speaker2_name,
         "call_date": existing_date or data.get("call_date") or today,
     }

@@ -87,6 +87,11 @@ async def run_analysis_pipeline(session_id: str) -> None:
             session.agent_name = metadata["speaker1_name"]
             session.client_name = metadata["speaker2_name"]
             session.call_date = metadata["call_date"]
+            session.metadata_es = {
+                "call_title": metadata.get("call_title_es"),
+                "agent_name": metadata.get("speaker1_name_es"),
+                "client_name": metadata.get("speaker2_name_es"),
+            }
             session.updated_at = datetime.now(timezone.utc)
             db.add(session)
             await db.commit()

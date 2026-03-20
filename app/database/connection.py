@@ -42,5 +42,11 @@ async def create_tables() -> None:
     from app.models import session as session_models  # noqa: F401
     from app.models import report as report_models  # noqa: F401
 
+    from sqlalchemy import text
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add bilingual column to existing sessions table if it doesn't exist
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS metadata_es JSONB"
+        ))

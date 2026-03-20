@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import os
+from functools import partial
 
-from deepgram import AsyncDeepgramClient
-from deepgram.core.request_options import RequestOptions
+from elevenlabs.client import ElevenLabs
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -17,68 +17,52 @@ _RETRY_DELAY = 5  # seconds between retries
 
 async def transcribe_audio(audio_path: str) -> list[dict]:
     """
-    Transcribe an audio file using Deepgram with speaker diarization.
+    Transcribe an audio file using ElevenLabs Scribe with speaker diarization.
 
     Returns a list of utterance dicts:
         [{"speaker": "Speaker 1"|"Speaker 2", "text": str, "start": float, "end": float}]
     """
-    deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
+    client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
 
     file_mb = os.path.getsize(audio_path) / 1_048_576
-    logger.info(f"[Transcription] Reading {audio_path} ({file_mb:.1f} MB) into memory …")
+    logger.info(f"[Transcription] Reading {audio_path} ({file_mb:.1f} MB) …")
 
     with open(audio_path, "rb") as fh:
         audio_bytes = fh.read()
 
-    logger.info(f"[Transcription] Sending {file_mb:.1f} MB to Deepgram …")
+    logger.info(f"[Transcription] Sending {file_mb:.1f} MB to ElevenLabs Scribe …")
 
     last_exc: Exception | None = None
+    response = None
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             if attempt > 1:
                 logger.info(f"[Transcription] Retry {attempt}/{_MAX_RETRIES} …")
                 await asyncio.sleep(_RETRY_DELAY)
-            response = await deepgram.listen.v1.media.transcribe_file(
-                request=audio_bytes,
-                model="nova-3",
+
+            # ElevenLabs SDK is sync — run in a thread to avoid blocking the event loop
+            fn = partial(
+                client.speech_to_text.convert,
+                file=(os.path.basename(audio_path), audio_bytes),
+                model_id="scribe_v1",
                 diarize=True,
-                punctuate=True,
-                utterances=True,
-                filler_words=True,
-                detect_language=True,
-                request_options=RequestOptions(timeout_in_seconds=600),
             )
+            response = await asyncio.get_event_loop().run_in_executor(None, fn)
             break
         except Exception as exc:
             last_exc = exc
-            logger.warning(f"[Transcription] Attempt {attempt} failed: {type(exc).__name__}: {exc}")
+            logger.warning(
+                f"[Transcription] Attempt {attempt} failed: {type(exc).__name__}: {exc}"
+            )
             if attempt == _MAX_RETRIES:
                 raise
-    else:
+
+    if response is None:
         raise last_exc  # type: ignore[misc]
 
-    logger.info("[Transcription] Deepgram processing complete.")
+    logger.info("[Transcription] ElevenLabs processing complete.")
 
-    utterances_raw = response.results.utterances
-    if not utterances_raw:
-        # Fallback: try to build utterances from words if diarization data exists
-        logger.warning(
-            "No utterances returned from Deepgram; attempting word-level fallback."
-        )
-        return _build_utterances_from_words(response)
-
-    result = []
-    for utt in utterances_raw:
-        speaker_int = utt.speaker if utt.speaker is not None else 0
-        speaker_label = SPEAKER_MAP.get(speaker_int, f"Speaker {speaker_int}")
-        result.append(
-            {
-                "speaker": speaker_label,
-                "text": utt.transcript.strip(),
-                "start": round(float(utt.start), 3),
-                "end": round(float(utt.end), 3),
-            }
-        )
+    result = _build_utterances(response)
 
     logger.info(f"[Transcription] Complete — {len(result)} utterances\n")
     transcript_lines = "\n".join(
@@ -88,56 +72,70 @@ async def transcribe_audio(audio_path: str) -> list[dict]:
     return result
 
 
-def _build_utterances_from_words(response) -> list[dict]:
-    """
-    Fallback: group consecutive words by the same speaker into utterances.
-    """
+def _speaker_label(speaker_id: str | None, index: int) -> str:
+    """Map ElevenLabs speaker_id strings (e.g. 'speaker_0') to display labels."""
+    if speaker_id is None:
+        return SPEAKER_MAP.get(0, "Speaker 1")
+    # speaker_id is like "speaker_0", "speaker_1", …
     try:
-        words = response.results.channels[0].alternatives[0].words
-    except (AttributeError, IndexError, TypeError):
-        return []
+        idx = int(speaker_id.split("_")[-1])
+    except (ValueError, IndexError):
+        idx = index
+    return SPEAKER_MAP.get(idx, f"Speaker {idx + 1}")
 
+
+def _build_utterances(response) -> list[dict]:
+    """
+    Group ElevenLabs word-level results by consecutive speaker into utterances.
+    """
+    words = getattr(response, "words", None) or []
     if not words:
         return []
 
-    utterances = []
-    current_speaker = None
-    current_words = []
+    utterances: list[dict] = []
+    current_speaker: str | None = None
+    current_words: list[str] = []
     current_start = 0.0
     current_end = 0.0
+    speaker_index = 0
 
     for w in words:
-        sp = w.speaker if hasattr(w, "speaker") and w.speaker is not None else 0
+        # word type may be "word" or "spacing" — skip non-word tokens
+        word_type = getattr(w, "type", "word")
+        if word_type != "word":
+            continue
+
+        sp = getattr(w, "speaker_id", None)
+        text = getattr(w, "text", "").strip()
+        start = float(getattr(w, "start", 0) or 0)
+        end = float(getattr(w, "end", 0) or 0)
+
+        if not text:
+            continue
+
         if sp != current_speaker:
             if current_words and current_speaker is not None:
                 utterances.append(
                     {
-                        "speaker": SPEAKER_MAP.get(
-                            current_speaker, f"Speaker {current_speaker}"
-                        ),
+                        "speaker": _speaker_label(current_speaker, speaker_index),
                         "text": " ".join(current_words),
                         "start": round(current_start, 3),
                         "end": round(current_end, 3),
                     }
                 )
+                speaker_index += 1
             current_speaker = sp
-            current_words = [
-                w.punctuated_word if hasattr(w, "punctuated_word") else w.word
-            ]
-            current_start = float(w.start)
-            current_end = float(w.end)
+            current_words = [text]
+            current_start = start
+            current_end = end
         else:
-            current_words.append(
-                w.punctuated_word if hasattr(w, "punctuated_word") else w.word
-            )
-            current_end = float(w.end)
+            current_words.append(text)
+            current_end = end
 
     if current_words and current_speaker is not None:
         utterances.append(
             {
-                "speaker": SPEAKER_MAP.get(
-                    current_speaker, f"Speaker {current_speaker}"
-                ),
+                "speaker": _speaker_label(current_speaker, speaker_index),
                 "text": " ".join(current_words),
                 "start": round(current_start, 3),
                 "end": round(current_end, 3),

@@ -44,6 +44,8 @@ class Session(Base):
         nullable=False,
     )
 
+    metadata_es: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

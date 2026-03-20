@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.database.connection import get_db
 from app.models.session import Session
 from app.models.report import Report
-from app.services.report_generator import generate_pdf_bytes, generate_docx_bytes
+from app.services.report_generator import generate_pdf_bytes, generate_docx_bytes, generate_html_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -47,30 +47,48 @@ async def get_report(
 @router.get("/{session_id}/report/pdf", response_class=Response)
 async def download_report_pdf(
     session_id: str,
+    lang: str = Query("en", regex="^(en|es)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate and return the coaching report as a PDF file."""
     report_data = await _load_report_data(session_id, db)
-    pdf_bytes = generate_pdf_bytes(report_data)
+    pdf_bytes = generate_pdf_bytes(report_data, lang=lang)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="report_{session_id}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.pdf"'},
     )
 
 
 @router.get("/{session_id}/report/docx", response_class=Response)
 async def download_report_docx(
     session_id: str,
+    lang: str = Query("en", regex="^(en|es)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate and return the coaching report as a DOCX file."""
     report_data = await _load_report_data(session_id, db)
-    docx_bytes = generate_docx_bytes(report_data)
+    docx_bytes = generate_docx_bytes(report_data, lang=lang)
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="report_{session_id}.docx"'},
+        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.docx"'},
+    )
+
+
+@router.get("/{session_id}/report/html", response_class=Response)
+async def download_report_html(
+    session_id: str,
+    lang: str = Query("en", regex="^(en|es)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate and return the coaching report as a styled HTML file."""
+    report_data = await _load_report_data(session_id, db)
+    html_bytes = generate_html_bytes(report_data, lang=lang)
+    return Response(
+        content=html_bytes,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.html"'},
     )
 
 

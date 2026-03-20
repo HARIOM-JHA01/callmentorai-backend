@@ -109,11 +109,15 @@ async def get_session(
 
     progress = get_progress(session.id) if session.status == "processing" else None
 
+    meta_es = (session.metadata_es or {}) if hasattr(session, "metadata_es") else {}
     return {
         "session_id": session.id,
         "call_title": session.call_title,
+        "call_title_es": meta_es.get("call_title"),
         "agent_name": session.agent_name,
+        "agent_name_es": meta_es.get("agent_name"),
         "client_name": session.client_name,
+        "client_name_es": meta_es.get("client_name"),
         "call_date": session.call_date,
         "status": session.status,
         "error_message": session.error_message,
