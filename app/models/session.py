@@ -2,6 +2,9 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, Text, JSON, ForeignKey, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.models.user import User
 from app.database.connection import Base
 import enum
 
@@ -40,6 +43,11 @@ class Session(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user: Mapped["User | None"] = relationship("User", back_populates="sessions")
 
     transcript: Mapped["Transcript | None"] = relationship("Transcript", back_populates="session", uselist=False)
     rubric: Mapped["Rubric | None"] = relationship("Rubric", back_populates="session", uselist=False)

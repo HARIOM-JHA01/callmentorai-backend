@@ -12,8 +12,10 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database.connection import get_db
 from app.models.session import Session, Transcript, Analysis
+from app.models.user import User
 from app.pipelines.analysis_pipeline import run_analysis_pipeline
 from app.services.progress import get_progress
+from app.services.auth import get_optional_user
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,6 +47,7 @@ async def upload_session(
     call_title: Optional[str] = Form(None),
     call_date: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """
     Upload a call audio file and rubric PDF to create a new analysis session.
@@ -81,6 +84,7 @@ async def upload_session(
         audio_path=audio_path,
         rubric_path=rubric_path,
         status="pending",
+        user_id=current_user.id if current_user else None,
     )
     db.add(session)
     await db.commit()

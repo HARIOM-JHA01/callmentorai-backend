@@ -38,6 +38,7 @@ async def get_db() -> AsyncSession:
 
 async def create_tables() -> None:
     # Import all models so Base has them registered
+    from app.models import user as user_models  # noqa: F401
     from app.models import session as session_models  # noqa: F401
     from app.models import report as report_models  # noqa: F401
 

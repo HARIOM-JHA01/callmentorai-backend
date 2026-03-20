@@ -121,13 +121,14 @@ Ensure:
     logger.info("Sending transcript and rubric to GPT-4o for call analysis")
 
     response = await client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4.1-2025-04-14",
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.2,
+        temperature=0,
+        seed=42,
         max_tokens=4096,
     )
 

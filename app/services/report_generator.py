@@ -364,6 +364,14 @@ def generate_pdf_bytes(report_data: dict) -> bytes:
     return buffer.read()
 
 
+def _safe(value) -> str:
+    """Strip XML-incompatible characters (null bytes, control chars) from a string."""
+    import re
+    text = str(value) if value is not None else ""
+    # Remove null bytes and control characters except tab, newline, carriage return
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+
+
 def generate_docx_bytes(report_data: dict) -> bytes:
     """Generate a DOCX report from report_data and return as bytes."""
     from docx import Document
@@ -382,10 +390,10 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     tbl = doc.add_table(rows=5, cols=2)
     tbl.style = "Table Grid"
     rows_data = [
-        ("Agent", summary.get("agent_name", "")),
-        ("Client", summary.get("client_name", "")),
-        ("Call Title", summary.get("call_title", "")),
-        ("Call Date", summary.get("call_date", "")),
+        ("Agent", _safe(summary.get("agent_name", ""))),
+        ("Client", _safe(summary.get("client_name", ""))),
+        ("Call Title", _safe(summary.get("call_title", ""))),
+        ("Call Date", _safe(summary.get("call_date", ""))),
         (
             "Overall Score",
             f"{summary.get('overall_score', 0)} / {summary.get('max_score', 0)} "
@@ -394,7 +402,7 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     ]
     for i, (label, value) in enumerate(rows_data):
         tbl.rows[i].cells[0].text = label
-        tbl.rows[i].cells[1].text = str(value)
+        tbl.rows[i].cells[1].text = _safe(value)
 
     doc.add_paragraph()
 
@@ -412,10 +420,10 @@ def generate_docx_bytes(report_data: dict) -> bytes:
             run.bold = True
         for i, s in enumerate(scores, 1):
             row = score_tbl.rows[i]
-            row.cells[0].text = s.get("category", "")
-            row.cells[1].text = str(s.get("score", 0))
-            row.cells[2].text = str(s.get("max_score", 0))
-            row.cells[3].text = s.get("reason", "")
+            row.cells[0].text = _safe(s.get("category", ""))
+            row.cells[1].text = _safe(s.get("score", 0))
+            row.cells[2].text = _safe(s.get("max_score", 0))
+            row.cells[3].text = _safe(s.get("reason", ""))
         doc.add_paragraph()
 
     # Strengths
@@ -423,7 +431,7 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     if strengths:
         doc.add_heading("Strengths", level=1)
         for item in strengths:
-            doc.add_paragraph(item, style="List Bullet")
+            doc.add_paragraph(_safe(item), style="List Bullet")
         doc.add_paragraph()
 
     # Improvements
@@ -431,7 +439,7 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     if improvements:
         doc.add_heading("Areas for Improvement", level=1)
         for item in improvements:
-            doc.add_paragraph(item, style="List Bullet")
+            doc.add_paragraph(_safe(item), style="List Bullet")
         doc.add_paragraph()
 
     # Key Moments
@@ -439,7 +447,7 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     if key_moments:
         doc.add_heading("Key Moments", level=1)
         for km in key_moments:
-            doc.add_paragraph(f"[{km.get('timestamp', '')}] {km.get('description', '')}", style="List Bullet")
+            doc.add_paragraph(f"[{_safe(km.get('timestamp', ''))}] {_safe(km.get('description', ''))}", style="List Bullet")
         doc.add_paragraph()
 
     # Recommendations
@@ -447,7 +455,7 @@ def generate_docx_bytes(report_data: dict) -> bytes:
     if recommendations:
         doc.add_heading("Coaching Recommendations", level=1)
         for i, rec in enumerate(recommendations, 1):
-            doc.add_paragraph(f"{i}. {rec}")
+            doc.add_paragraph(f"{i}. {_safe(rec)}")
 
     buf = io.BytesIO()
     doc.save(buf)

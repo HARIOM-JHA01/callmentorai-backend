@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database.connection import create_tables
-from app.api import sessions, analysis, coach
+from app.api import sessions, analysis, coach, auth, dashboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,9 +66,11 @@ app.add_middleware(
 # ----------------------------------------------------------------
 # Routers
 # ----------------------------------------------------------------
+app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(analysis.router)
 app.include_router(coach.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/", tags=["health"])

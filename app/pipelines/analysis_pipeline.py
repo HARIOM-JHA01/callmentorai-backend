@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.database.connection import AsyncSessionLocal
 from app.models.session import Session, Transcript, Rubric, Analysis
 from app.services.transcription import transcribe_audio
+from app.services.metadata_extractor import extract_call_metadata
 from app.services.rubric_parser import parse_rubric
 from app.services.call_analyzer import analyze_call
 from app.services.embeddings import build_embeddings
@@ -70,6 +71,26 @@ async def run_analysis_pipeline(session_id: str) -> None:
             await db.commit()
             set_progress(session_id, 35, "transcribing_done")
             logger.info(f"[Pipeline] Transcript saved: {len(utterances)} utterances")
+
+            # ----------------------------------------------------------------
+            # Step 1b: Extract / enrich call metadata from transcript if missing
+            # ----------------------------------------------------------------
+            logger.info(f"[Pipeline] Step 1b: Extracting call metadata for session {session_id}")
+            metadata = await extract_call_metadata(
+                utterances=utterances,
+                existing_title=session.call_title,
+                existing_speaker1_name=session.agent_name,
+                existing_speaker2_name=session.client_name,
+                existing_date=session.call_date,
+            )
+            session.call_title = metadata["call_title"]
+            session.agent_name = metadata["speaker1_name"]
+            session.client_name = metadata["speaker2_name"]
+            session.call_date = metadata["call_date"]
+            session.updated_at = datetime.now(timezone.utc)
+            db.add(session)
+            await db.commit()
+            logger.info(f"[Pipeline] Metadata saved: title='{session.call_title}', date='{session.call_date}'")
 
             # ----------------------------------------------------------------
             # Step 2: Rubric parsing  (35 → 45 %)
