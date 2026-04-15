@@ -5,13 +5,23 @@ import aiofiles
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    BackgroundTasks,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 
 from app.config import get_settings
 from app.database.connection import get_db
-from app.models.session import Session, Transcript, Analysis
+from app.models.session import Session, Transcript, Rubric, Analysis
+from app.models.report import Report
 from app.models.user import User
 from app.pipelines.analysis_pipeline import run_analysis_pipeline
 from app.services.progress import get_progress
@@ -40,7 +50,9 @@ def _validate_extension(filename: str, allowed: set[str]) -> str:
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_session(
     background_tasks: BackgroundTasks,
-    audio_file: UploadFile = File(..., description="Call audio file (.mp3, .wav, .m4a, .ogg)"),
+    audio_file: UploadFile = File(
+        ..., description="Call audio file (.mp3, .wav, .m4a, .ogg)"
+    ),
     rubric_pdf: UploadFile = File(..., description="Evaluation rubric PDF"),
     agent_name: Optional[str] = Form(None),
     client_name: Optional[str] = Form(None),
@@ -54,8 +66,12 @@ async def upload_session(
     Triggers the full analysis pipeline as a background task.
     """
     # Validate file extensions
-    audio_ext = _validate_extension(audio_file.filename or "file.unknown", ALLOWED_AUDIO_EXTENSIONS)
-    _validate_extension(rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS)
+    audio_ext = _validate_extension(
+        audio_file.filename or "file.unknown", ALLOWED_AUDIO_EXTENSIONS
+    )
+    _validate_extension(
+        rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS
+    )
 
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(settings.UPLOAD_DIR, session_id)
@@ -105,7 +121,9 @@ async def get_session(
     result = await db.execute(select(Session).where(Session.id == session_id))
     session: Session | None = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
 
     progress = get_progress(session.id) if session.status == "processing" else None
 
@@ -138,7 +156,9 @@ async def get_transcript(
     session_result = await db.execute(select(Session).where(Session.id == session_id))
     session: Session | None = session_result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
 
     if session.status == "pending":
         raise HTTPException(
@@ -156,10 +176,15 @@ async def get_transcript(
             detail=f"Session analysis failed: {session.error_message}",
         )
 
-    transcript_result = await db.execute(select(Transcript).where(Transcript.session_id == session_id))
+    transcript_result = await db.execute(
+        select(Transcript).where(Transcript.session_id == session_id)
+    )
     transcript: Transcript | None = transcript_result.scalar_one_or_none()
     if not transcript:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found for this session")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transcript not found for this session",
+        )
 
     return {
         "session_id": session_id,
@@ -177,7 +202,9 @@ async def get_analysis(
     session_result = await db.execute(select(Session).where(Session.id == session_id))
     session: Session | None = session_result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
 
     if session.status in ("pending", "processing"):
         raise HTTPException(
@@ -190,10 +217,15 @@ async def get_analysis(
             detail=f"Session analysis failed: {session.error_message}",
         )
 
-    analysis_result = await db.execute(select(Analysis).where(Analysis.session_id == session_id))
+    analysis_result = await db.execute(
+        select(Analysis).where(Analysis.session_id == session_id)
+    )
     analysis: Analysis | None = analysis_result.scalar_one_or_none()
     if not analysis:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found for this session")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Analysis not found for this session",
+        )
 
     return {
         "session_id": session_id,
@@ -202,3 +234,93 @@ async def get_analysis(
         "improvements": analysis.improvements,
         "key_moments": analysis.key_moments,
     }
+
+
+@router.get("/sessions")
+async def get_all_sessions(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all sessions with complete information (transcript, rubric, analysis, report)."""
+    result = await db.execute(select(Session).order_by(desc(Session.created_at)))
+    sessions = result.scalars().all()
+
+    all_sessions = []
+    for session in sessions:
+        meta_es = (session.metadata_es or {}) if hasattr(session, "metadata_es") else {}
+
+        session_data = {
+            "session_id": session.id,
+            "call_title": session.call_title,
+            "call_title_es": meta_es.get("call_title"),
+            "agent_name": session.agent_name,
+            "agent_name_es": meta_es.get("agent_name"),
+            "client_name": session.client_name,
+            "client_name_es": meta_es.get("client_name"),
+            "call_date": session.call_date,
+            "status": session.status,
+            "error_message": session.error_message,
+            "created_at": session.created_at.isoformat()
+            if session.created_at
+            else None,
+            "updated_at": session.updated_at.isoformat()
+            if session.updated_at
+            else None,
+        }
+
+        transcript_data = None
+        if session.status == "completed":
+            transcript_result = await db.execute(
+                select(Transcript).where(Transcript.session_id == session.id)
+            )
+            transcript = transcript_result.scalar_one_or_none()
+            if transcript:
+                transcript_data = {
+                    "utterances": transcript.utterances,
+                    "total": len(transcript.utterances),
+                }
+
+        rubric_data = None
+        if session.status == "completed":
+            rubric_result = await db.execute(
+                select(Rubric).where(Rubric.session_id == session.id)
+            )
+            rubric = rubric_result.scalar_one_or_none()
+            if rubric:
+                rubric_data = {
+                    "criteria": rubric.criteria,
+                }
+
+        analysis_data = None
+        if session.status == "completed":
+            analysis_result = await db.execute(
+                select(Analysis).where(Analysis.session_id == session.id)
+            )
+            analysis = analysis_result.scalar_one_or_none()
+            if analysis:
+                analysis_data = {
+                    "scores": analysis.scores,
+                    "strengths": analysis.strengths,
+                    "improvements": analysis.improvements,
+                    "key_moments": analysis.key_moments,
+                }
+
+        report_data = None
+        if session.status == "completed":
+            report_result = await db.execute(
+                select(Report).where(Report.session_id == session.id)
+            )
+            report = report_result.scalar_one_or_none()
+            if report:
+                report_data = report.report_data
+
+        all_sessions.append(
+            {
+                "session": session_data,
+                "transcript": transcript_data,
+                "rubric": rubric_data,
+                "analysis": analysis_data,
+                "report": report_data,
+            }
+        )
+
+    return all_sessions
