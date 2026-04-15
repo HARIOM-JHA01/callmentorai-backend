@@ -112,6 +112,96 @@ async def upload_session(
     return {"session_id": session_id}
 
 
+@router.get("/all")
+async def get_all_sessions(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all sessions with complete information (transcript, rubric, analysis, report)."""
+    result = await db.execute(select(Session).order_by(desc(Session.created_at)))
+    sessions = result.scalars().all()
+
+    all_sessions = []
+    for session in sessions:
+        meta_es = (session.metadata_es or {}) if hasattr(session, "metadata_es") else {}
+
+        session_data = {
+            "session_id": session.id,
+            "call_title": session.call_title,
+            "call_title_es": meta_es.get("call_title"),
+            "agent_name": session.agent_name,
+            "agent_name_es": meta_es.get("agent_name"),
+            "client_name": session.client_name,
+            "client_name_es": meta_es.get("client_name"),
+            "call_date": session.call_date,
+            "status": session.status,
+            "error_message": session.error_message,
+            "created_at": session.created_at.isoformat()
+            if session.created_at
+            else None,
+            "updated_at": session.updated_at.isoformat()
+            if session.updated_at
+            else None,
+        }
+
+        transcript_data = None
+        if session.status == "completed":
+            transcript_result = await db.execute(
+                select(Transcript).where(Transcript.session_id == session.id)
+            )
+            transcript = transcript_result.scalar_one_or_none()
+            if transcript:
+                transcript_data = {
+                    "utterances": transcript.utterances,
+                    "total": len(transcript.utterances),
+                }
+
+        rubric_data = None
+        if session.status == "completed":
+            rubric_result = await db.execute(
+                select(Rubric).where(Rubric.session_id == session.id)
+            )
+            rubric = rubric_result.scalar_one_or_none()
+            if rubric:
+                rubric_data = {
+                    "criteria": rubric.criteria,
+                }
+
+        analysis_data = None
+        if session.status == "completed":
+            analysis_result = await db.execute(
+                select(Analysis).where(Analysis.session_id == session.id)
+            )
+            analysis = analysis_result.scalar_one_or_none()
+            if analysis:
+                analysis_data = {
+                    "scores": analysis.scores,
+                    "strengths": analysis.strengths,
+                    "improvements": analysis.improvements,
+                    "key_moments": analysis.key_moments,
+                }
+
+        report_data = None
+        if session.status == "completed":
+            report_result = await db.execute(
+                select(Report).where(Report.session_id == session.id)
+            )
+            report = report_result.scalar_one_or_none()
+            if report:
+                report_data = report.report_data
+
+        all_sessions.append(
+            {
+                "session": session_data,
+                "transcript": transcript_data,
+                "rubric": rubric_data,
+                "analysis": analysis_data,
+                "report": report_data,
+            }
+        )
+
+    return all_sessions
+
+
 @router.get("/{session_id}")
 async def get_session(
     session_id: str,
@@ -234,93 +324,3 @@ async def get_analysis(
         "improvements": analysis.improvements,
         "key_moments": analysis.key_moments,
     }
-
-
-@router.get("/sessions")
-async def get_all_sessions(
-    db: AsyncSession = Depends(get_db),
-):
-    """Return all sessions with complete information (transcript, rubric, analysis, report)."""
-    result = await db.execute(select(Session).order_by(desc(Session.created_at)))
-    sessions = result.scalars().all()
-
-    all_sessions = []
-    for session in sessions:
-        meta_es = (session.metadata_es or {}) if hasattr(session, "metadata_es") else {}
-
-        session_data = {
-            "session_id": session.id,
-            "call_title": session.call_title,
-            "call_title_es": meta_es.get("call_title"),
-            "agent_name": session.agent_name,
-            "agent_name_es": meta_es.get("agent_name"),
-            "client_name": session.client_name,
-            "client_name_es": meta_es.get("client_name"),
-            "call_date": session.call_date,
-            "status": session.status,
-            "error_message": session.error_message,
-            "created_at": session.created_at.isoformat()
-            if session.created_at
-            else None,
-            "updated_at": session.updated_at.isoformat()
-            if session.updated_at
-            else None,
-        }
-
-        transcript_data = None
-        if session.status == "completed":
-            transcript_result = await db.execute(
-                select(Transcript).where(Transcript.session_id == session.id)
-            )
-            transcript = transcript_result.scalar_one_or_none()
-            if transcript:
-                transcript_data = {
-                    "utterances": transcript.utterances,
-                    "total": len(transcript.utterances),
-                }
-
-        rubric_data = None
-        if session.status == "completed":
-            rubric_result = await db.execute(
-                select(Rubric).where(Rubric.session_id == session.id)
-            )
-            rubric = rubric_result.scalar_one_or_none()
-            if rubric:
-                rubric_data = {
-                    "criteria": rubric.criteria,
-                }
-
-        analysis_data = None
-        if session.status == "completed":
-            analysis_result = await db.execute(
-                select(Analysis).where(Analysis.session_id == session.id)
-            )
-            analysis = analysis_result.scalar_one_or_none()
-            if analysis:
-                analysis_data = {
-                    "scores": analysis.scores,
-                    "strengths": analysis.strengths,
-                    "improvements": analysis.improvements,
-                    "key_moments": analysis.key_moments,
-                }
-
-        report_data = None
-        if session.status == "completed":
-            report_result = await db.execute(
-                select(Report).where(Report.session_id == session.id)
-            )
-            report = report_result.scalar_one_or_none()
-            if report:
-                report_data = report.report_data
-
-        all_sessions.append(
-            {
-                "session": session_data,
-                "transcript": transcript_data,
-                "rubric": rubric_data,
-                "analysis": analysis_data,
-                "report": report_data,
-            }
-        )
-
-    return all_sessions
