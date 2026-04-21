@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database.connection import create_tables, get_db
 from app.api import sessions, analysis, coach, auth, dashboard
+from app.api.analytics_agent import router as analytics_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,6 +88,7 @@ app.include_router(sessions.router)
 app.include_router(analysis.router)
 app.include_router(coach.router)
 app.include_router(dashboard.router)
+app.include_router(analytics_router)
 
 
 @app.get("/", tags=["health"])
