@@ -50,3 +50,15 @@ async def create_tables() -> None:
         await conn.execute(text(
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS metadata_es JSONB"
         ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS team VARCHAR(100)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS supervisor VARCHAR(100)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS campaign VARCHAR(100)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS queue VARCHAR(100)"
+        ))

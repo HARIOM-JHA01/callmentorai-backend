@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.config import get_settings
-from app.database.connection import create_tables
+from app.database.connection import create_tables, get_db
 from app.api import sessions, analysis, coach, auth, dashboard
 
 logging.basicConfig(
@@ -23,14 +24,29 @@ async def lifespan(app: FastAPI):
     # ----------------------------------------------------------------
     # Startup
     # ----------------------------------------------------------------
-    # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info(f"Upload directory ready: {settings.UPLOAD_DIR}")
 
-    # Run DB migrations (create_all for all mapped tables)
     logger.info("Running database migrations …")
     await create_tables()
     logger.info("Database tables ready")
+
+    # Re-enqueue any sessions that were left pending from a previous run
+    from app.models.session import Session as SessionModel
+    from app.services.processing_queue import processing_queue
+
+    async for db in get_db():
+        result = await db.execute(
+            select(SessionModel).where(SessionModel.status == "pending")
+        )
+        pending = result.scalars().all()
+        if pending:
+            logger.info(f"Re-enqueueing {len(pending)} pending sessions from previous run")
+            for s in pending:
+                processing_queue.enqueue(s.id)
+        else:
+            processing_queue.start()
+        break
 
     yield
 

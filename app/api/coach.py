@@ -87,30 +87,25 @@ async def coach_chat(
     analysis_summary = _format_analysis_for_prompt(analysis_data)
 
     system_prompt = (
-        "You are an AI call coach. Your role is to help agents improve their customer service and sales skills. "
-        "Use the provided transcript excerpts and rubric evaluation to answer coaching questions. "
-        "Be specific — cite examples from the transcript using speaker labels and timestamps where available. "
-        "Provide actionable, constructive advice."
+        "You are an AI call coach helping sales and customer service agents improve. "
+        "Answer coaching questions concisely — keep total responses under 180 words. "
+        "Structure your answer: one short opening sentence, then bullet points (use '- ' prefix) for specific observations or advice. "
+        "Use **bold** only for key terms or agent names. Never write more than 2 consecutive sentences without a bullet list. "
+        "Cite transcript evidence with speaker labels and timestamps when available. "
+        "Be direct and actionable — skip filler phrases like 'Great question' or 'It's important to note'."
     )
 
-    user_prompt = f"""Session context:
-Agent: {session.agent_name or 'Unknown'}
-Client: {session.client_name or 'Unknown'}
-Call Title: {session.call_title or 'Untitled'}
+    user_prompt = f"""Session: {session.call_title or 'Untitled'} | Agent: {session.agent_name or 'Unknown'} | Client: {session.client_name or 'Unknown'}
 
---- RELEVANT TRANSCRIPT EXCERPTS ---
+--- RELEVANT TRANSCRIPT ---
 {transcript_context}
 
---- RUBRIC CRITERIA ---
+--- RUBRIC & SCORES ---
 {rubric_summary}
-
---- ANALYSIS RESULTS ---
 {analysis_summary}
 
---- COACHING QUESTION ---
-{request.question}
-
-Please answer the coaching question based on the above context. Be specific and cite evidence from the transcript."""
+--- QUESTION ---
+{request.question}"""
 
     client = _get_openai()
     logger.info(f"Coaching question for session {request.session_id}: {request.question[:80]}...")
@@ -122,7 +117,7 @@ Please answer the coaching question based on the above context. Be specific and 
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.4,
-        max_tokens=1024,
+        max_tokens=600,
     )
 
     answer = response.choices[0].message.content.strip()

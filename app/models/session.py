@@ -24,6 +24,10 @@ class Session(Base):
     agent_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     call_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    team: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    supervisor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    queue: Mapped[str | None] = mapped_column(String(100), nullable=True)
     audio_path: Mapped[str] = mapped_column(Text, nullable=False)
     rubric_path: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(

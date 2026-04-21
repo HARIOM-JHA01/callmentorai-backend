@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_db
-from app.models.session import Session
+from app.models.session import Analysis, Session
 from app.models.report import Report
 from app.models.user import User
 from app.services.auth import get_current_user
@@ -50,6 +52,10 @@ async def list_sessions(
             "agent_name": s.agent_name,
             "client_name": s.client_name,
             "call_date": s.call_date,
+            "team": s.team,
+            "supervisor": s.supervisor,
+            "campaign": s.campaign,
+            "queue": s.queue,
             "status": s.status,
             "created_at": s.created_at.isoformat(),
             "overall_score": overall_score,
@@ -113,4 +119,139 @@ async def get_stats(
         "avg_score": avg_score,
         "avg_max_score": avg_max,
         "score_trend": trend,
+    }
+
+
+def _parse_any_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        if "T" in text:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.fromisoformat(f"{text}T00:00:00")
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _in_date_range(session: Session, date_range: str) -> bool:
+    now = datetime.now(timezone.utc)
+    if date_range == "today":
+        min_dt = now - timedelta(days=1)
+    elif date_range == "7d":
+        min_dt = now - timedelta(days=7)
+    elif date_range == "30d":
+        min_dt = now - timedelta(days=30)
+    else:
+        min_dt = now - timedelta(days=90)
+
+    session_dt = _parse_any_datetime(session.call_date) or session.created_at
+    return session_dt >= min_dt
+
+
+@router.get("/enterprise/compliance")
+async def get_enterprise_compliance(
+    date_range: str = Query("30d", pattern="^(today|7d|30d|90d)$"),
+    team: str | None = None,
+    supervisor: str | None = None,
+    campaign: str | None = None,
+    queue: str | None = None,
+    status: str | None = Query(None, pattern="^(completed|pending|processing|failed)$"),
+    agent_search: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Compliance is computed only from completed sessions with analyses.
+    if status and status != "completed":
+        return {"categories": []}
+
+    stmt = (
+        select(Session, Analysis)
+        .join(Analysis, Analysis.session_id == Session.id)
+        .where(Session.user_id == current_user.id)
+        .where(Session.status == "completed")
+    )
+    if team:
+        stmt = stmt.where(Session.team == team)
+    if supervisor:
+        stmt = stmt.where(Session.supervisor == supervisor)
+    if campaign:
+        stmt = stmt.where(Session.campaign == campaign)
+    if queue:
+        stmt = stmt.where(Session.queue == queue)
+    if agent_search:
+        stmt = stmt.where(Session.agent_name.ilike(f"%{agent_search}%"))
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    buckets: dict[str, list[float]] = {}
+    for session, analysis in rows:
+        if not _in_date_range(session, date_range):
+            continue
+        for item in analysis.scores or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("category") or "").strip()
+            score = item.get("score")
+            max_score = item.get("max_score")
+            if not name or score is None or not max_score:
+                continue
+            try:
+                pct = (float(score) / float(max_score)) * 100
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+            buckets.setdefault(name, []).append(pct)
+
+    categories = [
+        {"name": name, "score": round(sum(values) / len(values))}
+        for name, values in buckets.items()
+        if values
+    ]
+    categories.sort(key=lambda x: x["score"], reverse=True)
+    return {"categories": categories}
+
+
+@router.get("/enterprise/filters")
+async def get_enterprise_filters(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    teams_result = await db.execute(
+        select(func.distinct(Session.team))
+        .where(Session.user_id == current_user.id)
+        .where(Session.team.is_not(None))
+    )
+    supervisors_result = await db.execute(
+        select(func.distinct(Session.supervisor))
+        .where(Session.user_id == current_user.id)
+        .where(Session.supervisor.is_not(None))
+    )
+    campaigns_result = await db.execute(
+        select(func.distinct(Session.campaign))
+        .where(Session.user_id == current_user.id)
+        .where(Session.campaign.is_not(None))
+    )
+    queues_result = await db.execute(
+        select(func.distinct(Session.queue))
+        .where(Session.user_id == current_user.id)
+        .where(Session.queue.is_not(None))
+    )
+
+    teams = sorted(x.strip() for x in teams_result.scalars().all() if isinstance(x, str) and x.strip())
+    supervisors = sorted(x.strip() for x in supervisors_result.scalars().all() if isinstance(x, str) and x.strip())
+    campaigns = sorted(x.strip() for x in campaigns_result.scalars().all() if isinstance(x, str) and x.strip())
+    queues = sorted(x.strip() for x in queues_result.scalars().all() if isinstance(x, str) and x.strip())
+
+    return {
+        "teams": teams,
+        "supervisors": supervisors,
+        "campaigns": campaigns,
+        "queues": queues,
     }
