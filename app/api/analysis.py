@@ -7,7 +7,11 @@ from sqlalchemy import select
 from app.database.connection import get_db
 from app.models.session import Session
 from app.models.report import Report
-from app.services.report_generator import generate_pdf_bytes, generate_docx_bytes, generate_html_bytes
+from app.services.report_generator import (
+    generate_pdf_bytes,
+    generate_docx_bytes,
+    generate_html_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,9 @@ async def get_report(
     session_result = await db.execute(select(Session).where(Session.id == session_id))
     session: Session | None = session_result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
 
     if session.status in ("pending", "processing"):
         raise HTTPException(
@@ -36,10 +42,15 @@ async def get_report(
             detail=f"Session analysis failed: {session.error_message}",
         )
 
-    report_result = await db.execute(select(Report).where(Report.session_id == session_id))
+    report_result = await db.execute(
+        select(Report).where(Report.session_id == session_id)
+    )
     report: Report | None = report_result.scalar_one_or_none()
     if not report:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found for this session")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found for this session",
+        )
 
     return {"session_id": session_id, "report": report.report_data}
 
@@ -47,7 +58,7 @@ async def get_report(
 @router.get("/{session_id}/report/pdf", response_class=Response)
 async def download_report_pdf(
     session_id: str,
-    lang: str = Query("en", regex="^(en|es)$"),
+    lang: str = Query("en", pattern="^(en|es)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate and return the coaching report as a PDF file."""
@@ -56,14 +67,16 @@ async def download_report_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.pdf"'
+        },
     )
 
 
 @router.get("/{session_id}/report/docx", response_class=Response)
 async def download_report_docx(
     session_id: str,
-    lang: str = Query("en", regex="^(en|es)$"),
+    lang: str = Query("en", pattern="^(en|es)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate and return the coaching report as a DOCX file."""
@@ -72,14 +85,16 @@ async def download_report_docx(
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.docx"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.docx"'
+        },
     )
 
 
 @router.get("/{session_id}/report/html", response_class=Response)
 async def download_report_html(
     session_id: str,
-    lang: str = Query("en", regex="^(en|es)$"),
+    lang: str = Query("en", pattern="^(en|es)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate and return the coaching report as a styled HTML file."""
@@ -88,7 +103,9 @@ async def download_report_html(
     return Response(
         content=html_bytes,
         media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.html"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="report_{session_id}_{lang}.html"'
+        },
     )
 
 
@@ -97,7 +114,9 @@ async def _load_report_data(session_id: str, db: AsyncSession) -> dict:
     session_result = await db.execute(select(Session).where(Session.id == session_id))
     session: Session | None = session_result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
 
     if session.status != "completed":
         raise HTTPException(
@@ -105,9 +124,14 @@ async def _load_report_data(session_id: str, db: AsyncSession) -> dict:
             detail=f"Session status is '{session.status}' — only 'completed' sessions have downloadable reports",
         )
 
-    report_result = await db.execute(select(Report).where(Report.session_id == session_id))
+    report_result = await db.execute(
+        select(Report).where(Report.session_id == session_id)
+    )
     report: Report | None = report_result.scalar_one_or_none()
     if not report:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found for this session")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found for this session",
+        )
 
     return report.report_data
