@@ -38,6 +38,7 @@ class AnalyticsContext(BaseModel):
 class AnalyticsChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
     context: AnalyticsContext
+    lang: str = "en"
 
 
 class AnalyticsChatResponse(BaseModel):
@@ -65,8 +66,14 @@ async def analytics_chat(
     request: AnalyticsChatRequest,
     current_user: User = Depends(get_current_user),
 ):
+    lang = request.lang
+    system_language = (
+        "Respond entirely in Spanish." if lang == "es" else "Respond in English."
+    )
+
     system_prompt = (
         "You are an AI analytics advisor for a call center operations dashboard. "
+        f"{system_language} "
         "Answer questions concisely — keep total responses under 200 words. "
         "Structure: one short opening sentence, then bullet points (use '- ' prefix) for specific findings. "
         "Use **bold** for metric names, team names, or agent names. "
