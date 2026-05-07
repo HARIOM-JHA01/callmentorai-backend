@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import logging
 import aiofiles
@@ -34,6 +35,21 @@ ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg"}
 ALLOWED_RUBRIC_EXTENSIONS = {".pdf"}
 
 
+def _clean_filename(filename: str | None) -> str | None:
+    """Turn a raw upload filename into a human-readable call title."""
+    if not filename:
+        return None
+    name = os.path.splitext(filename)[0]
+    if "~" in name and len(name) > 40:
+        parts = name.split("~")
+        ts = re.search(r"\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})", parts[0])
+        if ts:
+            return f"Call from {ts.group(1)}:{ts.group(2)}"
+        return None
+    name = re.sub(r"[_\-]+", " ", name).strip()
+    return name[:80] if name else None
+
+
 def _validate_extension(filename: str, allowed: set[str]) -> str:
     """Return the lowercase extension or raise HTTPException."""
     ext = os.path.splitext(filename)[-1].lower()
@@ -56,7 +72,9 @@ async def _save_audio(audio_file: UploadFile, session_dir: str) -> str:
 
 
 async def _save_rubric(rubric_pdf: UploadFile, session_dir: str) -> str:
-    _validate_extension(rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS)
+    _validate_extension(
+        rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS
+    )
     rubric_path = os.path.join(session_dir, "rubric.pdf")
     async with aiofiles.open(rubric_path, "wb") as f:
         await f.write(await rubric_pdf.read())
@@ -65,8 +83,12 @@ async def _save_rubric(rubric_pdf: UploadFile, session_dir: str) -> str:
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_session(
-    audio_file: UploadFile = File(..., description="Call audio file (.mp3, .wav, .m4a, .ogg)"),
-    rubric_pdf: Optional[UploadFile] = File(None, description="Evaluation rubric PDF (optional)"),
+    audio_file: UploadFile = File(
+        ..., description="Call audio file (.mp3, .wav, .m4a, .ogg)"
+    ),
+    rubric_pdf: Optional[UploadFile] = File(
+        None, description="Evaluation rubric PDF (optional)"
+    ),
     agent_name: Optional[str] = Form(None),
     client_name: Optional[str] = Form(None),
     call_title: Optional[str] = Form(None),
@@ -88,7 +110,7 @@ async def upload_session(
 
     session = Session(
         id=session_id,
-        call_title=call_title,
+        call_title=call_title or _clean_filename(audio_file.filename),
         agent_name=agent_name,
         client_name=client_name,
         call_date=call_date,
@@ -113,7 +135,9 @@ async def upload_session(
 @router.post("/batch-upload", status_code=status.HTTP_201_CREATED)
 async def batch_upload_sessions(
     audio_files: List[UploadFile] = File(..., description="Multiple call audio files"),
-    rubric_pdf: Optional[UploadFile] = File(None, description="Shared evaluation rubric PDF (optional)"),
+    rubric_pdf: Optional[UploadFile] = File(
+        None, description="Shared evaluation rubric PDF (optional)"
+    ),
     agent_name: Optional[str] = Form(None),
     team: Optional[str] = Form(None),
     supervisor: Optional[str] = Form(None),
@@ -137,7 +161,9 @@ async def batch_upload_sessions(
     rubric_bytes: Optional[bytes] = None
     rubric_filename: Optional[str] = None
     if rubric_pdf:
-        _validate_extension(rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS)
+        _validate_extension(
+            rubric_pdf.filename or "file.unknown", ALLOWED_RUBRIC_EXTENSIONS
+        )
         rubric_bytes = await rubric_pdf.read()
         rubric_filename = rubric_pdf.filename
 
@@ -157,7 +183,7 @@ async def batch_upload_sessions(
                 await f.write(rubric_bytes)
 
         # Derive a call title from the original filename (strip extension)
-        derived_title = os.path.splitext(audio_file.filename or "")[0] or None
+        derived_title = _clean_filename(audio_file.filename)
 
         session = Session(
             id=session_id,
@@ -213,8 +239,12 @@ async def get_all_sessions(
             "call_date": session.call_date,
             "status": session.status,
             "error_message": session.error_message,
-            "created_at": session.created_at.isoformat() if session.created_at else None,
-            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            "created_at": session.created_at.isoformat()
+            if session.created_at
+            else None,
+            "updated_at": session.updated_at.isoformat()
+            if session.updated_at
+            else None,
         }
 
         transcript_data = None
