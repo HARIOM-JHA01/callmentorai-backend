@@ -192,6 +192,7 @@ async def get_enterprise_compliance(
     rows = result.all()
 
     buckets: dict[str, list[float]] = {}
+    bucket_es: dict[str, str] = {}
     for session, analysis in rows:
         if not _in_date_range(session, date_range):
             continue
@@ -199,6 +200,7 @@ async def get_enterprise_compliance(
             if not isinstance(item, dict):
                 continue
             name = str(item.get("category") or "").strip()
+            name_es = item.get("category_es")
             score = item.get("score")
             max_score = item.get("max_score")
             if not name or score is None or not max_score:
@@ -208,9 +210,11 @@ async def get_enterprise_compliance(
             except (TypeError, ValueError, ZeroDivisionError):
                 continue
             buckets.setdefault(name, []).append(pct)
+            if name_es and name not in bucket_es:
+                bucket_es[name] = str(name_es).strip()
 
     categories = [
-        {"name": name, "score": round(sum(values) / len(values))}
+        {"name": name, "name_es": bucket_es.get(name), "score": round(sum(values) / len(values))}
         for name, values in buckets.items()
         if values
     ]
