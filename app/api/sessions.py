@@ -23,7 +23,8 @@ from app.models.session import Session, Transcript, Rubric, Analysis
 from app.models.report import Report
 from app.models.user import User
 from app.services.progress import get_progress
-from app.services.auth import get_optional_user
+from fastapi.responses import FileResponse
+from app.services.auth import get_optional_user, get_current_user
 from app.services.processing_queue import processing_queue
 
 logger = logging.getLogger(__name__)
@@ -425,3 +426,31 @@ async def get_analysis(
         "improvements": analysis.improvements,
         "key_moments": analysis.key_moments,
     }
+
+
+_AUDIO_MIME: dict[str, str] = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
+
+
+@router.get("/{session_id}/audio")
+async def get_audio(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream the original audio file for a completed session."""
+    session_result = await db.execute(select(Session).where(Session.id == session_id))
+    session: Session | None = session_result.scalar_one_or_none()
+    if not session or session.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if session.status != "completed":
+        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail="Processing not complete")
+    if not session.audio_path or not os.path.exists(session.audio_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file not found")
+    ext = os.path.splitext(session.audio_path)[1].lower()
+    media_type = _AUDIO_MIME.get(ext, "audio/mpeg")
+    return FileResponse(session.audio_path, media_type=media_type)
